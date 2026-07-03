@@ -1,6 +1,6 @@
 # Investment System
 
-A personal, rules-based investing app — installable PWA (works in any browser and on your phone), React + Vite front end, **Supabase** backend (Postgres + magic-link / passkey auth + row-level security), live prices from **Finnhub** and **Yahoo Finance**, deployed free on **GitHub Pages**.
+A personal, rules-based investing app — installable PWA (works in any browser and on your phone), React + Vite front end, **Supabase** backend (Postgres + magic-link / passkey auth + row-level security), live prices from **Finnhub** and **Yahoo Finance**. The front end is a static build, so it deploys free on any static host (Vercel, Netlify, Cloudflare Pages, GitHub Pages, …).
 
 Modules:
 - **Dashboard** — totals, allocation vs target, rule-breach alerts, market strip.
@@ -38,18 +38,21 @@ Modules:
      market-feed market-indices news-digest ipo-brief recompute-buy-targets
    ```
    > Prices need no key for non-US listings (Yahoo is keyless); `FINNHUB_API_KEY` covers US quotes + fundamentals. `diag` / `diag-fmp` are diagnostics only.
-4. **Auth → URL Configuration**: add your GitHub Pages URL (below) to *Site URL* and *Redirect URLs* so magic links / passkeys work. For local dev also add `http://localhost:5173`. To use passkeys / Face ID, enable **Passkeys** in the Auth settings.
+4. **Auth → URL Configuration**: add your deployed app URL (from step 2 below) to *Site URL* and *Redirect URLs* so magic links / passkeys work. For local dev also add `http://localhost:5173`. To use passkeys / Face ID, enable **Passkeys** in the Auth settings.
 
-### 2. GitHub (repo + hosting)
-1. Push this folder to a GitHub repo.
-2. Repo **Settings → Secrets and variables → Actions** → add:
-   - `VITE_SUPABASE_URL` = your Project URL
-   - `VITE_SUPABASE_ANON_KEY` = your anon / publishable key
-3. Repo **Settings → Pages** → Source = **GitHub Actions**. (On the free plan, Pages requires the repo to be **public**.)
-4. The included workflow (`.github/workflows/deploy.yml`) builds and deploys on every push to `main` (and can be run manually via **Actions → Run workflow**). Your app: `https://<user>.github.io/<repo>/`.
+### 2. Host the front end (any static host)
+`npm run build` produces a static `dist/` folder. `base: './'` + HashRouter means it works from any path or domain, so any of the options below serve it — pick one.
+
+Whichever host you use, set these two build-time env vars (Vite inlines them at build; they are public by design):
+- `VITE_SUPABASE_URL` = your Project URL
+- `VITE_SUPABASE_ANON_KEY` = your anon / publishable key
+
+- **Vercel / Netlify / Cloudflare Pages** — import the repo, set build command `npm run build`, output dir `dist`, and add the two env vars in the host's dashboard. Works with a **private** repo on their free tiers.
+- **GitHub Pages** — add the two vars as repo **Secrets → Actions**, set **Settings → Pages → Source = GitHub Actions**, and the included workflow (`.github/workflows/deploy.yml`) builds + deploys on every push to `main` (or via **Actions → Run workflow**) to `https://<user>.github.io/<repo>/`. Note: on the **free** plan GitHub Pages only serves **public** repos (private Pages needs Pro/Team).
+- **Local / self-hosted** — `npm run build && npm run preview`, or serve `dist/` from any static file server.
 
 ### 3. First run
-Open the Pages URL → sign in with your email (magic link) or a passkey → **Portfolio → Load my current portfolio** (seeds your holdings) → **Refresh prices**. Tune everything in **Rules**.
+Open your app URL → sign in with your email (magic link) or a passkey → **Portfolio → Load my current portfolio** (seeds your holdings) → **Refresh prices**. Tune everything in **Rules**.
 
 ---
 
