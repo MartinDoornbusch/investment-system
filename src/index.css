@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+body {
+  @apply bg-[#0d1117] text-[#e6edf3];
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+}
+
+/* ── Cards ─────────────────────────────────────────────────── */
+.card {
+  @apply bg-surface rounded-xl border border-border p-4;
+}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+.btn {
+  @apply inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 gap-1.5;
+}
+.btn-primary {
+  @apply btn bg-[#1f6feb] text-white hover:bg-brandblue;
+}
+.btn-ghost {
+  @apply btn text-dim hover:bg-surface-2 hover:text-[#e6edf3];
+}
+
+/* ── Inputs ─────────────────────────────────────────────────── */
+.input {
+  @apply w-full rounded-lg border border-border bg-surface-2 text-[#e6edf3] px-3 py-2 text-sm
+         focus:outline-none focus:ring-2 focus:ring-brandblue focus:border-transparent transition-all;
+}
+.input::placeholder {
+  color: #8b949e;
+}
+/* date/select need this so the arrow stays visible on dark */
+.input option { background: #1c2128; }
+
+.filter-select {
+  @apply w-full rounded border border-border bg-surface-2 text-dim text-xs px-1 py-1
+         focus:outline-none focus:ring-1 focus:ring-brandblue;
+}
+.filter-select option { background: #1c2128; }
+
+/* ── Labels & badges ────────────────────────────────────────── */
+.label {
+  @apply block text-[10px] font-semibold text-dim mb-1 uppercase tracking-widest;
+}
+.badge {
+  @apply inline-block rounded-full px-2 py-0.5 text-xs font-semibold;
+}
+
+/* ── Tables ─────────────────────────────────────────────────── */
+.th {
+  @apply text-left text-[11px] font-semibold text-dim px-3 py-2.5 border-b border-border bg-[#0d1117];
+}
+.td {
+  @apply px-3 py-3 text-sm border-b border-[#21262d] transition-colors duration-100;
+}
+tbody tr:hover .td {
+  background-color: #1c2128;
+}
+
+/* ── Scrollbar (webkit) ─────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
