@@ -1,6 +1,6 @@
 # Investment System
 
-A personal, rules-based investing app — installable PWA (works in any browser and on your phone), React + Vite front end, **Supabase** backend (Postgres + magic-link / passkey auth + row-level security), live prices from **Finnhub** and **Yahoo Finance**. The front end is a static build, so it deploys free on any static host (Vercel, Netlify, Cloudflare Pages, GitHub Pages, …).
+A personal, rules-based investing app — installable PWA (works in any browser and on your phone), React + Vite front end, **Supabase** backend (Postgres + magic-link / passkey auth + row-level security), live prices from **Finnhub** and **Yahoo Finance**. The front end is a static build, so it deploys free on any static host (Cloudflare Pages, Vercel, Netlify, …).
 
 Modules:
 - **Dashboard** — totals, allocation vs target, rule-breach alerts, market strip.
@@ -47,8 +47,15 @@ Whichever host you use, set these two build-time env vars (Vite inlines them at 
 - `VITE_SUPABASE_URL` = your Project URL
 - `VITE_SUPABASE_ANON_KEY` = your anon / publishable key
 
-- **Vercel / Netlify / Cloudflare Pages** — import the repo, set build command `npm run build`, output dir `dist`, and add the two env vars in the host's dashboard. Works with a **private** repo on their free tiers.
-- **GitHub Pages** — add the two vars as repo **Secrets → Actions**, set **Settings → Pages → Source = GitHub Actions**, and the included workflow (`.github/workflows/deploy.yml`) builds + deploys on every push to `main` (or via **Actions → Run workflow**) to `https://<user>.github.io/<repo>/`. Note: on the **free** plan GitHub Pages only serves **public** repos (private Pages needs Pro/Team).
+**Cloudflare Pages (recommended)** — generous free tier, works with a **private** repo, no bandwidth cap:
+1. Cloudflare dashboard → **Workers & Pages → Create → Pages → Connect to Git** → pick this repo.
+2. Framework preset **Vite**, build command `npm run build`, output directory `dist`. Node version comes from the committed `.nvmrc`.
+3. Add the two env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) under **Settings → Environment variables** (Production).
+4. Deploy. Every push to `main` rebuilds automatically. No SPA `_redirects` file is needed — the app uses HashRouter, so all routing is client-side.
+
+Other static hosts work the same way (build `npm run build`, output `dist`, set the two env vars in the host dashboard):
+- **Vercel / Netlify** — import the repo; both serve a private repo free.
+- **GitHub Pages** — possible, but the repo must be **public** on the free plan (private Pages needs Pro/Team), and you'd add your own GitHub Actions build-and-deploy workflow.
 - **Local / self-hosted** — `npm run build && npm run preview`, or serve `dist/` from any static file server.
 
 ### 3. First run
