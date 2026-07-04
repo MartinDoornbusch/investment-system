@@ -107,6 +107,15 @@ export async function listTransactions(): Promise<import('./types').Transaction[
   const { data } = await supabase.from('transactions').select('*').order('date', { ascending: false })
   return (data as import('./types').Transaction[]) ?? []
 }
+/** Order IDs already stored, so a re-import skips rows that are already in the ledger. */
+export async function existingOrderIds(): Promise<Set<string>> {
+  const { data } = await supabase.from('transactions').select('order_id')
+  return new Set(((data as any[]) ?? []).map(r => r.order_id).filter(Boolean))
+}
+export async function insertTransactions(rows: Omit<import('./types').Transaction, 'id'>[]) {
+  const id = await uid(); if (!id) throw new Error('not signed in')
+  return supabase.from('transactions').insert(rows.map(r => ({ ...r, user_id: id }))).select()
+}
 
 export async function listCorporateActions(): Promise<CorporateAction[]> {
   const { data } = await supabase.from('corporate_actions').select('*').order('effective_date', { ascending: false })
