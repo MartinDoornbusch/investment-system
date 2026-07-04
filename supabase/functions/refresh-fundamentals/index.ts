@@ -69,6 +69,46 @@ async function yahooMetrics(t: string): Promise<{ mom: number; vol: number; dd: 
   } catch { return null }
 }
 
+// European listings can't be scored via Finnhub's base symbol: it's either missing (RHM.DE -> "RHM")
+// or the WRONG company (ATO.PA -> "ATO" = Atmos Energy, a US utility). Pull real fundamentals from the
+// TradingView scanner instead (same source as refresh-universe-intl). Suffix -> TradingView exchange:
+const EU_TV_EXCHANGE: Record<string, string> = {
+  DE: 'XETR', F: 'FWB', L: 'LSE', SW: 'SIX', ST: 'OMXSTO', CO: 'OMXCOP', HE: 'OMXHEX', OL: 'OSL',
+  MI: 'MIL', MC: 'BME', VI: 'WBAG', AS: 'EURONEXT', PA: 'EURONEXT', BR: 'EURONEXT', LS: 'EURONEXT', IR: 'EURONEXT',
+}
+const TV_COLS = ['price_earnings_ttm', 'price_revenue_ttm', 'return_on_invested_capital', 'return_on_equity', 'operating_margin', 'after_tax_margin', 'gross_margin', 'debt_to_equity', 'total_revenue_yoy_growth_ttm', 'price_free_cash_flow_ttm', 'Perf.Y', 'Perf.1M', 'beta_1_year', 'market_cap_basic', 'sector'] as const
+
+async function tvFundamentals(ticker: string): Promise<Record<string, any> | null> {
+  const dot = ticker.lastIndexOf('.'); if (dot < 0) return null
+  const local = ticker.slice(0, dot), ex = EU_TV_EXCHANGE[ticker.slice(dot + 1)]
+  if (!ex) return null
+  try {
+    const r = await fetch('https://scanner.tradingview.com/global/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (investment-system fundamentals)' },
+      body: JSON.stringify({ symbols: { tickers: [`${ex}:${local}`] }, columns: TV_COLS }),
+    })
+    if (!r.ok) return null
+    const d = (await r.json())?.data?.[0]?.d
+    if (!Array.isArray(d) || d.length !== TV_COLS.length) return null
+    const g = (name: typeof TV_COLS[number]) => num(d[TV_COLS.indexOf(name)])
+    const pe = g('price_earnings_ttm'), revg = g('total_revenue_yoy_growth_ttm'), pfcf = g('price_free_cash_flow_ttm')
+    const perfY = g('Perf.Y'), perf1M = g('Perf.1M')
+    const ret121 = perfY != null && perf1M != null && perf1M > -100 ? ((1 + perfY / 100) / (1 + perf1M / 100) - 1) * 100 : perfY
+    const sectorRaw = d[TV_COLS.indexOf('sector')]
+    return {
+      pe, ps: g('price_revenue_ttm'),
+      peg: pe != null && revg != null && revg > 0 ? pe / revg : null,
+      roic: g('return_on_invested_capital') ?? g('return_on_equity'),
+      opm: g('operating_margin'), netm: g('after_tax_margin'), gm: g('gross_margin'),
+      de: g('debt_to_equity'), rev_growth: revg,
+      fcf_yield: pfcf && pfcf !== 0 ? 1 / pfcf : null,
+      ret1y: ret121, beta: g('beta_1_year'),
+      market_cap: g('market_cap_basic'), sector: typeof sectorRaw === 'string' ? sectorRaw : null,
+    }
+  } catch { return null }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (!FINN_KEY) return new Response(JSON.stringify({ ok: false, error: 'FINNHUB_API_KEY not set' }), { status: 500, headers: cors })
@@ -100,39 +140,46 @@ Deno.serve(async (req) => {
 
     const refreshed: string[] = []; const errors: string[] = []; const missingMassive: string[] = []
     for (const t of todo) {
-      // Finnhub uses the base US symbol; strip exchange suffix (ASML.AS -> ASML). ETFs (VWRL) simply won't resolve.
+      // European listing? Pull fundamentals from TradingView (Finnhub's base symbol is wrong/missing there).
+      const suffix = t.includes('.') ? t.split('.').pop()! : ''
+      const tv = EU_TV_EXCHANGE[suffix] ? await tvFundamentals(t) : null
+      if (EU_TV_EXCHANGE[suffix]) await sleep(300)
+
+      // Finnhub uses the base US symbol (ASML.AS -> ASML). Skip it when TradingView already gave us EU data.
       const fsym = t.includes('.') ? t.split('.')[0] : t
-      const met = await fj(`/stock/metric?symbol=${fsym}&metric=all`)
-      await sleep(300)
-      const prof = await fj(`/stock/profile2?symbol=${fsym}`)
-      await sleep(250)
+      const met = tv ? null : await fj(`/stock/metric?symbol=${fsym}&metric=all`)
+      if (!tv) await sleep(300)
+      const prof = tv ? null : await fj(`/stock/profile2?symbol=${fsym}`)
+      if (!tv) await sleep(250)
       const m = (met?.metric ?? {}) as Record<string, any>
       const mcapM = num(prof?.marketCapitalization)   // Finnhub returns market cap in millions
-      // Risk metrics: Massive (US) first, then Yahoo bars (covers non-US .AS/.KS/.KQ), else leave to Finnhub proxy.
+      // Risk metrics: Massive (US) first, then Yahoo bars (covers non-US .AS/.DE/.PA/.KS), else Finnhub proxy.
       let mv = skipMassive ? null : await massiveMetrics(t); let mvSrc: string | null = mv ? 'Massive' : null
       if (!skipMassive && !mv) { mv = await yahooMetrics(t); if (mv) mvSrc = 'Yahoo' }
 
-      const pe = num(m.peTTM) ?? num(m.peBasicExclExtraTTM) ?? num(m.peNormalizedAnnual)
-      const ps = num(m.psTTM)
-      const revg = num(m.revenueGrowthTTMYoy) ?? num(m.revenueGrowthQuarterlyYoy)
-      let peg = num(m.pegRatioTTM)
+      // Fundamentals: TradingView for EU names, else Finnhub metrics.
+      const pe = tv ? tv.pe : (num(m.peTTM) ?? num(m.peBasicExclExtraTTM) ?? num(m.peNormalizedAnnual))
+      const ps = tv ? tv.ps : num(m.psTTM)
+      const revg = tv ? tv.rev_growth : (num(m.revenueGrowthTTMYoy) ?? num(m.revenueGrowthQuarterlyYoy))
+      let peg = tv ? tv.peg : num(m.pegRatioTTM)
       if (peg == null && pe != null && revg != null && revg > 0) peg = pe / revg
-      const roic = num(m.roiTTM) ?? num(m.roaeTTM) ?? num(m.roeTTM)   // roiTTM = return on investment (ROIC proxy)
+      const roic = tv ? tv.roic : (num(m.roiTTM) ?? num(m.roaeTTM) ?? num(m.roeTTM))   // roiTTM = ROI (ROIC proxy)
       const pfcf = num(m.pfcfShareTTM)
+      const fundSrc = tv ? 'TradingView' : 'Finnhub'
       const row: any = {
         ticker: t,
-        beta: num(m.beta),
+        beta: tv ? tv.beta : num(m.beta),
         roic,
-        opm: num(m.operatingMarginTTM),
-        gm: num(m.grossMarginTTM),
-        netm: num(m.netProfitMarginTTM) ?? num(m.netMarginTTM),
+        opm: tv ? tv.opm : num(m.operatingMarginTTM),
+        gm: tv ? tv.gm : num(m.grossMarginTTM),
+        netm: tv ? tv.netm : (num(m.netProfitMarginTTM) ?? num(m.netMarginTTM)),
         pe, ps, peg,
-        de: num(m['totalDebt/totalEquityQuarterly']) ?? num(m['totalDebt/totalEquityAnnual']) ?? num(m['longTermDebt/equityQuarterly']),
-        fcf_yield: pfcf && pfcf !== 0 ? 1 / pfcf : null,
+        de: tv ? tv.de : (num(m['totalDebt/totalEquityQuarterly']) ?? num(m['totalDebt/totalEquityAnnual']) ?? num(m['longTermDebt/equityQuarterly'])),
+        fcf_yield: tv ? tv.fcf_yield : (pfcf && pfcf !== 0 ? 1 / pfcf : null),
         rev_growth: revg,
-        ret1y: num(m['52WeekPriceReturnDaily']),
-        market_cap: mcapM != null ? mcapM * 1e6 : (prev[t]?.market_cap ?? null),
-        sector: prof?.finnhubIndustry ?? (prev[t]?.sector ?? null),
+        ret1y: tv ? tv.ret1y : num(m['52WeekPriceReturnDaily']),
+        market_cap: tv ? (tv.market_cap ?? prev[t]?.market_cap ?? null) : (mcapM != null ? mcapM * 1e6 : (prev[t]?.market_cap ?? null)),
+        sector: tv ? (tv.sector ?? prev[t]?.sector ?? null) : (prof?.finnhubIndustry ?? (prev[t]?.sector ?? null)),
         // Preserve existing risk metrics when this run skips them.
         mom: mv ? mv.mom : (prev[t]?.mom ?? null),
         vol: mv ? mv.vol : (prev[t]?.vol ?? null),
@@ -143,7 +190,7 @@ Deno.serve(async (req) => {
       const okFund = pe != null || ps != null || roic != null || row.opm != null
       if (!okFund) errors.push(t)
       if (row.vol == null || row.mom == null) missingMassive.push(t)  // still on Finnhub proxy for scoring
-      console.log(`refresh ${t} (finnhub ${fsym}): pe=${pe} ps=${ps} roic=${roic} opm=${row.opm} revg=${revg} fund=${okFund} risk=${mvSrc ?? 'none'}`)
+      console.log(`refresh ${t} (${fundSrc}${tv ? '' : ' ' + fsym}): pe=${pe} ps=${ps} roic=${roic} opm=${row.opm} revg=${revg} fund=${okFund} risk=${mvSrc ?? 'none'}`)
       await admin.from('fundamentals').upsert(row)
       refreshed.push(t)
       if (!skipMassive) await sleep(mvSrc === 'Massive' ? 13000 : 1000) // Massive ~5/min; Yahoo/none needs no long wait
