@@ -3,6 +3,7 @@ import { getConfig, saveConfig } from '../lib/db'
 import { DEFAULT_CONFIG, ASSET_CLASSES, bucketLabel } from '../lib/defaults'
 import type { SystemConfig, Bucket, ScoreInput } from '../lib/types'
 import { Info } from '../components/Info'
+import { PushToggle } from '../components/PushToggle'
 import { SCORING_METHODS, UNSCORED_NOTE } from '../lib/analysis'
 import { G } from '../lib/glossary'
 
@@ -79,6 +80,8 @@ export default function Rules() {
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-navy">Rules / Investment Policy</h1>
       <p className="text-sm text-dim">Your written system. Hover the &#x24d8; icons for details and rationale.</p>
+
+      <PushToggle />
 
       {/* === Unified bucket table: Target + Scoring weights === */}
       <div className="card overflow-x-auto">
