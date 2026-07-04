@@ -157,7 +157,7 @@ export default function Portfolio() {
           <button className="btn-ghost border border-slate-300" onClick={doRefresh}>&#8635; Refresh prices</button>
           <button className="btn-ghost border border-slate-300" onClick={doRefreshData}>&#x27F3; Refresh market data</button>
           <button className="btn-ghost border border-slate-300" onClick={doAutoScore}>&#x21BB; Auto-score holdings</button>
-          {rows.length === 0 && <button className="btn-primary" onClick={doSeed}>Load my current portfolio</button>}
+          {rows.length === 0 && SEED_HOLDINGS.length > 0 && <button className="btn-primary" onClick={doSeed}>Load my current portfolio</button>}
         </div>
       </div>
       <div className="flex items-center gap-4 flex-wrap">

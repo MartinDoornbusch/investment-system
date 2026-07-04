@@ -124,29 +124,7 @@ export const DEFAULT_CONFIG: SystemConfig = {
   ].join('\n'),
 }
 
-// Leon's current portfolio (seed). Prices are entry/cost basis; live prices come from FMP.
-export const SEED_HOLDINGS = [
-  { ticker: 'NOW', name: 'ServiceNow', bucket: 'Concentrated', currency: 'USD', shares: 1470, entry_price: 93.69941176, notes: 'Sonja owns 70.25' },
-  { ticker: 'ASML.AS', name: 'ASML Holding', bucket: 'Core-Quality', currency: 'EUR', shares: 15, entry_price: 682.733333 },
-  { ticker: 'VWRL.AS', name: 'Vanguard FTSE All-World', bucket: 'Core-Index', currency: 'EUR', shares: 134, entry_price: 76.501641 },
-  { ticker: 'NVDA', name: 'NVIDIA', bucket: 'Core-Quality', currency: 'USD', shares: 100, entry_price: 49.559 },
-  { ticker: 'SHOP', name: 'Shopify', bucket: 'Growth', currency: 'USD', shares: 100, entry_price: 96.68 },
-  { ticker: 'VST', name: 'Vistra', bucket: 'Growth', currency: 'USD', shares: 43, entry_price: 125.4967 },
-  { ticker: 'LLY', name: 'Eli Lilly', bucket: 'Core-Quality', currency: 'USD', shares: 6, entry_price: 773.01 },
-  { ticker: 'ABNB', name: 'Airbnb', bucket: 'Growth', currency: 'USD', shares: 45, entry_price: 181.415384 },
-  { ticker: 'WM', name: 'Waste Management', bucket: 'Core-Quality', currency: 'USD', shares: 25, entry_price: 207.63 },
-  { ticker: 'SOUN', name: 'SoundHound AI', bucket: 'Speculative', currency: 'USD', shares: 627, entry_price: 7.96866 },
-  { ticker: 'TSLA', name: 'Tesla', bucket: 'Growth', currency: 'USD', shares: 9, entry_price: 36.133333 },
-  { ticker: 'NIO', name: 'NIO', bucket: 'Speculative', currency: 'USD', shares: 605, entry_price: 7.497351 },
-  { ticker: 'NU', name: 'Nu Holdings', bucket: 'Growth', currency: 'USD', shares: 201, entry_price: 12.57 },
-  { ticker: 'MU', name: 'Micron', bucket: 'Core-Quality', currency: 'USD', shares: 1, entry_price: 930 },
-  { ticker: 'GRAB', name: 'Grab Holdings', bucket: 'Speculative', currency: 'USD', shares: 304, entry_price: 3.54 },
-  { ticker: 'CPNG', name: 'Coupang', bucket: 'Growth', currency: 'USD', shares: 45, entry_price: 23.18 },
-  { ticker: 'TTMI', name: 'TTM Technologies', bucket: 'Speculative', currency: 'USD', shares: 3, entry_price: 173 },
-  { ticker: 'VOYG', name: 'Voyager Technologies', bucket: 'Speculative', currency: 'USD', shares: 13, entry_price: 45 },
-  { ticker: 'RGTI', name: 'Rigetti', bucket: 'Speculative', currency: 'USD', shares: 22, entry_price: 26.01 },
-  { ticker: 'QBTS', name: 'D-Wave Quantum', bucket: 'Speculative', currency: 'USD', shares: 19, entry_price: 29.29 },
-  { ticker: 'IONQ', name: 'IonQ', bucket: 'Speculative', currency: 'USD', shares: 8, entry_price: 64 },
-  { ticker: 'RKLB', name: 'Rocket Lab', bucket: 'Speculative', currency: 'USD', shares: 4, entry_price: 135 },
-  { ticker: 'LUNR', name: 'Intuitive Machines', bucket: 'Speculative', currency: 'USD', shares: 15, entry_price: 39 },
-] as const
+// Optional starter holdings for the "Load my current portfolio" button. Empty by default —
+// add your own positions on the Portfolio page, or import your broker ledger on Transactions.
+// `entry_price` is your average cost (native currency); live prices come from refresh-prices.
+export const SEED_HOLDINGS: { ticker: string; name: string; bucket: Bucket; currency: string; shares: number; entry_price: number; notes?: string }[] = []
