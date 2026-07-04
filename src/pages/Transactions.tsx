@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { listTransactions, listCorporateActions, addCorporateAction, deleteCorporateAction } from '../lib/db'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { listTransactions, listCorporateActions, addCorporateAction, deleteCorporateAction, listHoldings, existingOrderIds, insertTransactions } from '../lib/db'
 import type { Transaction, CorporateAction } from '../lib/types'
+import { parseDegiroCsv, guessTickerMap, loadTickerMemory, saveTickerMemory, type ParsedTx } from '../lib/degiro'
 import { useSort } from '../lib/useSort'
 import { Th } from '../components/Th'
 import { TickerModal } from '../components/TickerModal'
@@ -20,6 +21,42 @@ export default function Transactions() {
   const [actions, setActions] = useState<CorporateAction[]>([])
   const [af, setAf] = useState<CorporateAction>(blankAction)
   useEffect(() => { listTransactions().then(setTx); listCorporateActions().then(setActions) }, [])
+
+  // ── DeGiro CSV import ───────────────────────────────────────────────────────
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [imp, setImp] = useState<{ rows: ParsedTx[]; products: { isin: string; name: string; count: number }[]; map: Record<string, string>; warnings: string[] } | null>(null)
+  const [impBusy, setImpBusy] = useState('')
+  const [impMsg, setImpMsg] = useState('')
+
+  async function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; e.target.value = '' // allow re-selecting the same file
+    if (!f) return
+    setImpMsg('')
+    const text = await f.text()
+    const { rows, products, warnings } = parseDegiroCsv(text)
+    if (!rows.length) { setImpMsg(warnings[0] || 'Nothing to import.'); return }
+    const holdings = await listHoldings()
+    const map = { ...guessTickerMap(products, holdings), ...loadTickerMemory() }
+    setImp({ rows, products, map, warnings })
+  }
+
+  async function doImport() {
+    if (!imp) return
+    setImpBusy('Importing…')
+    try {
+      const seen = await existingOrderIds()
+      const fresh = imp.rows.filter(r => !r.order_id || !seen.has(r.order_id))
+      const skipped = imp.rows.length - fresh.length
+      const rows = fresh.map(r => ({ ...r, ticker: (r.isin && imp.map[r.isin]) || r.ticker }))
+      const { error } = await insertTransactions(rows)
+      if (error) { setImpBusy(''); setImpMsg(`Import failed: ${error.message}`); return }
+      saveTickerMemory(imp.map)
+      setTx(await listTransactions())
+      setImp(null); setImpBusy('')
+      setImpMsg(`Imported ${rows.length} transaction${rows.length === 1 ? '' : 's'}${skipped ? ` · skipped ${skipped} already in ledger` : ''}.`)
+    } catch (err: any) { setImpBusy(''); setImpMsg(`Import failed: ${err?.message || err}`) }
+  }
+  const mapped = imp ? imp.products.filter(p => imp.map[p.isin]).length : 0
 
   async function saveAction() {
     if (!af.ticker || !af.effective_date || !af.ratio) return
@@ -119,7 +156,12 @@ export default function Transactions() {
       <div className="card overflow-x-auto">
         <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
           <h2 className="font-semibold">Trade ledger <span className="text-xs font-normal text-dim">· sort or filter in the column headers, click a ticker for details</span></h2>
+          <div className="flex items-center gap-2">
+            <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
+            <button className="btn-ghost border border-border text-sm" onClick={() => fileRef.current?.click()}>Import DeGiro CSV</button>
+          </div>
         </div>
+        {impMsg && <p className="text-xs text-dim mb-2">{impMsg}</p>}
         {/* Mobile: condensed transaction cards */}
         <div className="md:hidden space-y-2">
           {sort.sorted.map(t => (
@@ -177,6 +219,53 @@ export default function Transactions() {
         </table>
       </div>
       {sel && <TickerModal ticker={sel} onClose={() => setSel(null)} />}
+
+      {/* DeGiro import preview + ISIN→ticker mapping */}
+      {imp && (
+        <div className="fixed inset-0 z-40 bg-black/60 flex items-start md:items-center justify-center p-3 overflow-y-auto" onClick={() => !impBusy && setImp(null)}>
+          <div className="card w-full max-w-2xl my-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <h2 className="text-lg font-bold text-navy">Import DeGiro transactions</h2>
+              <button className="text-dim hover:text-[#e6edf3]" onClick={() => !impBusy && setImp(null)}>✕</button>
+            </div>
+            <p className="text-sm text-dim mb-3">
+              Found <b className="text-[#e6edf3]">{imp.rows.length}</b> transactions across <b className="text-[#e6edf3]">{imp.products.length}</b> products.
+              DeGiro exports no ticker, so assign one per product below (matched to your holdings where possible) — rows without a ticker still import but won’t reconcile. Rows already in your ledger (by Order ID) are skipped.
+            </p>
+            {imp.warnings.map((w, i) => <p key={i} className="text-xs text-amber-400 mb-2">{w}</p>)}
+
+            <div className="max-h-[45vh] overflow-y-auto border border-border rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-surface-2"><tr>
+                  <th className="th text-left">Product</th><th className="th text-left">ISIN</th>
+                  <th className="th text-right">Rows</th><th className="th text-left">Ticker</th>
+                </tr></thead>
+                <tbody>
+                  {imp.products.map(p => (
+                    <tr key={p.isin}>
+                      <td className="td">{p.name}</td>
+                      <td className="td text-[11px] text-dim">{p.isin}</td>
+                      <td className="td text-right text-dim">{p.count}</td>
+                      <td className="td">
+                        <input className="input py-1 w-28" placeholder="e.g. NOW" value={imp.map[p.isin] || ''}
+                          onChange={e => setImp(s => s && ({ ...s, map: { ...s.map, [p.isin]: e.target.value.toUpperCase() } }))} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 mt-3 flex-wrap">
+              <span className="text-xs text-dim">{mapped}/{imp.products.length} products mapped to a ticker</span>
+              <div className="flex gap-2">
+                <button className="btn-ghost" disabled={!!impBusy} onClick={() => setImp(null)}>Cancel</button>
+                <button className="btn-primary" disabled={!!impBusy} onClick={doImport}>{impBusy || `Import ${imp.rows.length} transactions`}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
