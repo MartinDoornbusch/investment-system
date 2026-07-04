@@ -1,0 +1,36 @@
+name: Fill universe
+
+# One-shot bulk enrichment of the US screener universe: calls refresh-universe (enrich) in a
+# paced loop until no rows are left pending, so the Screener isn't limited to the first alphabetical
+# slice. Paced to stay under the free Finnhub rate limit (~2 calls/ticker).
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_REF: msudkicgsjpfqjfphdhh
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+jobs:
+  fill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Enrich until done
+        run: |
+          set -euo pipefail
+          SR=$(curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/api-keys?reveal=true" \
+            | jq -r '.[] | select(.name=="service_role") | .api_key')
+          test -n "$SR" || { echo "could not read service_role key"; exit 1; }
+          URL="https://$PROJECT_REF.supabase.co/functions/v1/refresh-universe"
+          for i in $(seq 1 160); do
+            R=$(curl -sS -X POST "$URL" -H "Authorization: Bearer $SR" \
+              -H "Content-Type: application/json" --data '{"step":"enrich","batch":15}' || true)
+            OK=$(echo "$R" | jq -r '.ok // false')
+            REM=$(echo "$R" | jq -r '.remaining // empty')
+            PEND=$(echo "$R" | jq -r '.pending // empty')
+            echo "iter $i: ok=$OK pending=$PEND remaining=$REM"
+            if [ "$OK" != "true" ]; then echo "response: $R"; fi
+            if [ "${REM:-0}" = "0" ] && [ "$OK" = "true" ]; then echo "universe fully enriched"; break; fi
+            sleep 45
+          done

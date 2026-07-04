@@ -1,0 +1,28 @@
+name: Test alerts
+
+# Fire the send-alerts push digest once, on demand (same auth path as the cron job).
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_REF: msudkicgsjpfqjfphdhh
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Invoke send-alerts
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          SR=$(curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/api-keys?reveal=true" \
+            | jq -r '.[] | select(.name=="service_role") | .api_key')
+          test -n "$SR" || { echo "could not read service_role key"; exit 1; }
+          echo "Response:"
+          curl -sS -X POST "https://$PROJECT_REF.supabase.co/functions/v1/send-alerts" \
+            -H "Authorization: Bearer $SR" -H "Content-Type: application/json" \
+            --data "{\"secret\":\"$CRON_SECRET\"}"
+          echo
