@@ -39,3 +39,58 @@ jobs:
 
       - name: Deploy Edge Functions
         run: supabase functions deploy --project-ref "$PROJECT_REF"
+
+      - name: Set up cron jobs
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          BASE="https://$PROJECT_REF.supabase.co/functions/v1"
+          # Fetch the service_role key (a valid JWT the Edge Function gateway accepts).
+          SR=$(curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/api-keys?reveal=true" \
+            | jq -r '.[] | select(.name=="service_role") | .api_key')
+          test -n "$SR" || { echo "could not read service_role key"; exit 1; }
+
+          # pg_cron jobs. Dollar-quoted ($job$) so the inner SQL needs no escaping; the invsys-* jobs
+          # are unscheduled first so re-running the workflow is idempotent.
+          SQL=$(cat <<SQL
+          create extension if not exists pg_cron;
+          create extension if not exists pg_net;
+          do \$do\$ declare j record; begin
+            for j in select jobname from cron.job where jobname like 'invsys-%' loop
+              perform cron.unschedule(j.jobname);
+            end loop;
+          end \$do\$;
+          select cron.schedule('invsys-universe-enrich','0 2 * * *', \$job\$
+            select net.http_post(url:='$BASE/refresh-universe',
+              headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
+              body:=jsonb_build_object('step','enrich','batch',15)); \$job\$);
+          select cron.schedule('invsys-prices','0 6 * * 1-5', \$job\$
+            select net.http_post(url:='$BASE/refresh-prices',
+              headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
+              body:=jsonb_build_object('tickers', array['ASML.AS','RHM.DE','ESTC','ATO.PA'])); \$job\$);
+          select cron.schedule('invsys-fundamentals','10 6 * * *', \$job\$
+            select net.http_post(url:='$BASE/refresh-fundamentals',
+              headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
+              body:=jsonb_build_object('secret','$CRON_SECRET','all',true)); \$job\$);
+          select cron.schedule('invsys-autoscore','30 6 * * *', \$job\$
+            select net.http_post(url:='$BASE/auto-score',
+              headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
+              body:=jsonb_build_object('secret','$CRON_SECRET')); \$job\$);
+          select cron.schedule('invsys-alerts','45 6 * * 1-5', \$job\$
+            select net.http_post(url:='$BASE/send-alerts',
+              headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
+              body:=jsonb_build_object('secret','$CRON_SECRET')); \$job\$);
+          select cron.schedule('invsys-buytargets','0 5 * * 1', \$job\$
+            select net.http_post(url:='$BASE/recompute-buy-targets',
+              headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
+              body:=jsonb_build_object('secret','$CRON_SECRET')); \$job\$);
+          SQL
+          )
+          CODE=$(curl -sS -o /tmp/cron_resp.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" \
+            --data "$(jq -n --arg q "$SQL" '{query:$q}')")
+          echo "HTTP $CODE"; cat /tmp/cron_resp.json
+          case "$CODE" in 2*) echo "cron jobs scheduled";; *) echo "cron setup failed"; exit 1;; esac
