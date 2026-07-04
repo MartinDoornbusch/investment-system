@@ -37,72 +37,93 @@ function scoreProfile(bucket, x) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {
+    const body = await req.json().catch(() => ({}))
     const auth = req.headers.get('Authorization') ?? ''
     const userClient = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_ANON_KEY'), { global: { headers: { Authorization: auth } } })
     const { data: { user } } = await userClient.auth.getUser()
-    if (!user) return new Response(JSON.stringify({ ok: false, error: 'not signed in' }), { status: 401, headers: cors })
+    // Two entry paths: an interactive user (JWT), or a scheduled job carrying CRON_SECRET (no user).
+    const cronSecret = Deno.env.get('CRON_SECRET')
+    const cronOk = !user && !!body?.secret && !!cronSecret && body.secret === cronSecret
+    if (!user && !cronOk) return new Response(JSON.stringify({ ok: false, error: 'not signed in' }), { status: 401, headers: cors })
 
-    const [{ data: holdings }, { data: fundRows }, { data: cfgRow }, { data: existingScores }] = await Promise.all([
-      userClient.from('holdings').select('ticker,bucket'),
-      userClient.from('fundamentals').select('*'),
-      userClient.from('system_config').select('config').maybeSingle(),
-      userClient.from('scores').select('ticker,note,created_at,composite,value,quality,momentum,safety').order('created_at', { ascending: false }),
-    ])
-    const configWeights = cfgRow?.config?.weights
+    // Always read/write via the service role, scoped explicitly by user_id — this lets one cron run
+    // score every user, while an interactive call still only touches its own rows.
+    const admin = createClient(Deno.env.get('SUPABASE_URL'), Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'))
+    const { data: fundRows } = await admin.from('fundamentals').select('*') // shared cache (no user_id)
     const fmap = {}
     ;(fundRows ?? []).forEach((f) => { fmap[f.ticker] = f })
-    // Latest saved score per ticker → the set that was real (Massive/Yahoo price history), so a fresh Finnhub
-    // proxy won't bury a better score (#3). Notes carry the source ('Massive…'/'Yahoo…' vs 'Finnhub…').
-    const lastMassive = new Set(); const latestScore = {}; const seenScore = new Set()
-    ;(existingScores ?? []).forEach((s) => { if (!seenScore.has(s.ticker)) { seenScore.add(s.ticker); latestScore[s.ticker] = s; if (s.note && /Massive|Yahoo/i.test(s.note)) lastMassive.add(s.ticker) } })
-    const scoredBuckets = new Set(['Core-Quality', 'Growth', 'Concentrated', 'Speculative'])
-    const rows = []; const skipped = []; const uncached = []; const keptMassive = []; const missingMassive = []
-    const today = new Date().toISOString().slice(0, 10)
 
-    for (const h of (holdings ?? [])) {
-      if (!scoredBuckets.has(h.bucket)) { skipped.push(h.ticker); continue }
-      const f = fmap[h.ticker]
-      if (!f) { uncached.push(h.ticker); continue }
-      const beta = f.beta, roic = f.roic, opm = f.opm, gm = f.gm, netm = f.netm
-      const pe = f.pe, ps = f.ps, de = f.de, fcf = f.fcf_yield, revg = f.rev_growth
-      let peg = f.peg
-      const netcash = de != null && de < 0.3
-      // Missing ROIC -> no moat credit (was +1, which rewarded absent data). And because "roic" here is
-      // really Finnhub ROI/ROE (leverage-inflated), cap a high reading to narrow-moat when debt is high:
-      // ROE can look great on borrowed money, but the KB's moat test is ROIC durably above cost of capital.
-      const levered = de != null && de > 2
-      let moat = roic != null ? (roic >= 25 ? 2 : roic >= 15 ? 1 : 0) : 0
-      if (levered) moat = Math.min(moat, 1)
-      if (peg == null && pe != null && revg && revg > 0) peg = pe / revg
-      const hasMassive = f.vol != null && f.mom != null
-      if (!hasMassive) missingMassive.push(h.ticker)
-      // #3: skip a fresh Finnhub-proxy re-score when a real (Massive/Yahoo) score already exists for this ticker.
-      if (!hasMassive && lastMassive.has(h.ticker)) { keptMassive.push(h.ticker); continue }
-      const momScore = hasMassive ? momentum(f.mom) : momentum(f.ret1y)
-      const safety = hasMassive ? safetyFromRisk(f.vol, f.dd) : safetyBeta(beta, netcash)
-      const msSrc = hasMassive ? `${f.price_src || 'Massive'}(vol/DD/12-1)` : 'Finnhub(beta/1Y)'
-
-      const p = scoreProfile(h.bucket, { peg, pe, ps, revg, roic, opm, gm, netm, fcf, moat, momScore })
-      const w = weightsFor(h.bucket, configWeights)
-      const compositeRaw = Math.round((p.value * w.v + p.quality * w.q + p.mom * w.m + safety * w.s) / 100)
-      // Only flag inputs the bucket's method actually uses. Growth/Speculative score Value via P/S (valueG),
-      // so PEG/ROIC are irrelevant there; quality buckets use PEG + ROIC.
-      const growthLike = h.bucket === 'Growth' || h.bucket === 'Speculative'
-      const missing = (growthLike
-        ? [ps == null && 'P/S', revg == null && 'revGrowth', opm == null && 'margins']
-        : [roic == null && 'ROIC', peg == null && 'PEG']).filter(Boolean)
-      // Penalize + flag low-confidence scores: missing Value/Quality inputs fall back to neutral defaults,
-      // so without a penalty a data-starved name can outrank a fully-analyzed one. Dock the composite in
-      // proportion to missing critical data so it can't. (Leon's call: penalize + flag.)
-      const critCount = growthLike ? 3 : 2
-      const conf = (critCount - missing.length) / critCount
-      const penalty = Math.round((1 - conf) * 18)
-      const composite = clamp(compositeRaw - penalty)
-      const verdict = composite >= 75 ? 'Strong' : composite >= 60 ? 'Watch' : 'Pass/Review'
-      const note = `Auto (cache) +${msSrc} ${today} | ${h.bucket} V${w.v}/Q${w.q}/M${w.m}/Saf${w.s} | ${p.method}` + (missing.length ? ` | low-conf ${Math.round(conf * 100)}% (−${penalty}): missing ${missing.join(', ')}` : '')
-      rows.push({ user_id: user.id, ticker: h.ticker, value: p.value, quality: p.quality, momentum: p.mom, safety, composite, verdict, note })
+    let userIds
+    if (user) userIds = [user.id]
+    else {
+      const { data: us } = await admin.from('holdings').select('user_id')
+      userIds = [...new Set((us ?? []).map((r) => r.user_id))]
     }
-    if (rows.length) { const { error } = await userClient.from('scores').insert(rows); if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { status: 500, headers: cors }) }
-    return new Response(JSON.stringify({ ok: true, scored: rows.length, skipped: skipped.length, uncached, keptMassive, missingMassive }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+
+    const scoredBuckets = new Set(['Core-Quality', 'Growth', 'Concentrated', 'Speculative'])
+    const today = new Date().toISOString().slice(0, 10)
+    let totalScored = 0, totalSkipped = 0
+    const uncached = [], keptMassive = [], missingMassive = []
+
+    for (const uid of userIds) {
+      const [{ data: holdings }, { data: cfgRow }, { data: existingScores }] = await Promise.all([
+        admin.from('holdings').select('ticker,bucket').eq('user_id', uid),
+        admin.from('system_config').select('config').eq('user_id', uid).maybeSingle(),
+        admin.from('scores').select('ticker,note,created_at,composite,value,quality,momentum,safety').eq('user_id', uid).order('created_at', { ascending: false }),
+      ])
+      const configWeights = cfgRow?.config?.weights
+      // Latest saved score per ticker → the set that was real (Massive/Yahoo price history), so a fresh Finnhub
+      // proxy won't bury a better score (#3). Notes carry the source ('Massive…'/'Yahoo…' vs 'Finnhub…').
+      const lastMassive = new Set(); const seenScore = new Set()
+      ;(existingScores ?? []).forEach((s) => { if (!seenScore.has(s.ticker)) { seenScore.add(s.ticker); if (s.note && /Massive|Yahoo/i.test(s.note)) lastMassive.add(s.ticker) } })
+      const rows = []
+
+      for (const h of (holdings ?? [])) {
+        if (!scoredBuckets.has(h.bucket)) { totalSkipped++; continue }
+        const f = fmap[h.ticker]
+        if (!f) { uncached.push(h.ticker); continue }
+        const beta = f.beta, roic = f.roic, opm = f.opm, gm = f.gm, netm = f.netm
+        const pe = f.pe, ps = f.ps, de = f.de, fcf = f.fcf_yield, revg = f.rev_growth
+        let peg = f.peg
+        const netcash = de != null && de < 0.3
+        // Missing ROIC -> no moat credit (was +1, which rewarded absent data). And because "roic" here is
+        // really Finnhub ROI/ROE (leverage-inflated), cap a high reading to narrow-moat when debt is high:
+        // ROE can look great on borrowed money, but the KB's moat test is ROIC durably above cost of capital.
+        const levered = de != null && de > 2
+        let moat = roic != null ? (roic >= 25 ? 2 : roic >= 15 ? 1 : 0) : 0
+        if (levered) moat = Math.min(moat, 1)
+        if (peg == null && pe != null && revg && revg > 0) peg = pe / revg
+        const hasMassive = f.vol != null && f.mom != null
+        if (!hasMassive) missingMassive.push(h.ticker)
+        // #3: skip a fresh Finnhub-proxy re-score when a real (Massive/Yahoo) score already exists for this ticker.
+        if (!hasMassive && lastMassive.has(h.ticker)) { keptMassive.push(h.ticker); continue }
+        const momScore = hasMassive ? momentum(f.mom) : momentum(f.ret1y)
+        const safety = hasMassive ? safetyFromRisk(f.vol, f.dd) : safetyBeta(beta, netcash)
+        const msSrc = hasMassive ? `${f.price_src || 'Massive'}(vol/DD/12-1)` : 'Finnhub(beta/1Y)'
+
+        const p = scoreProfile(h.bucket, { peg, pe, ps, revg, roic, opm, gm, netm, fcf, moat, momScore })
+        const w = weightsFor(h.bucket, configWeights)
+        const compositeRaw = Math.round((p.value * w.v + p.quality * w.q + p.mom * w.m + safety * w.s) / 100)
+        // Only flag inputs the bucket's method actually uses. Growth/Speculative score Value via P/S (valueG),
+        // so PEG/ROIC are irrelevant there; quality buckets use PEG + ROIC.
+        const growthLike = h.bucket === 'Growth' || h.bucket === 'Speculative'
+        const missing = (growthLike
+          ? [ps == null && 'P/S', revg == null && 'revGrowth', opm == null && 'margins']
+          : [roic == null && 'ROIC', peg == null && 'PEG']).filter(Boolean)
+        // Penalize + flag low-confidence scores: missing Value/Quality inputs fall back to neutral defaults,
+        // so without a penalty a data-starved name can outrank a fully-analyzed one. Dock the composite in
+        // proportion to missing critical data so it can't.
+        const critCount = growthLike ? 3 : 2
+        const conf = (critCount - missing.length) / critCount
+        const penalty = Math.round((1 - conf) * 18)
+        const composite = clamp(compositeRaw - penalty)
+        const verdict = composite >= 75 ? 'Strong' : composite >= 60 ? 'Watch' : 'Pass/Review'
+        const note = `Auto (cache) +${msSrc} ${today} | ${h.bucket} V${w.v}/Q${w.q}/M${w.m}/Saf${w.s} | ${p.method}` + (missing.length ? ` | low-conf ${Math.round(conf * 100)}% (−${penalty}): missing ${missing.join(', ')}` : '')
+        rows.push({ user_id: uid, ticker: h.ticker, value: p.value, quality: p.quality, momentum: p.mom, safety, composite, verdict, note })
+      }
+      if (rows.length) { const { error } = await admin.from('scores').insert(rows); if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { status: 500, headers: cors }) }
+      totalScored += rows.length
+    }
+    return new Response(JSON.stringify({ ok: true, scored: totalScored, users: userIds.length, skipped: totalSkipped, uncached, keptMassive, missingMassive }), { headers: { ...cors, 'Content-Type': 'application/json' } })
   } catch (e) { return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: cors }) }
 })
