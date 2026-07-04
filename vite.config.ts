@@ -19,6 +19,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon-192.png', 'icon-512.png'],
+      // Pull the Web Push handlers into the generated service worker.
+      workbox: { importScripts: ['push-sw.js'] },
       manifest: {
         name: 'Investment System',
         short_name: 'InvSys',
