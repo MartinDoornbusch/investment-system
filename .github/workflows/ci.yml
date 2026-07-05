@@ -1,0 +1,27 @@
+name: CI
+
+# Quality gate: draait bij elke push en PR. Zelfde patroon als martin-trade:
+# geen wijziging zonder geslaagde tests en type-check.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests (vitest)
+        run: npm test
+      - name: Type-check + build (tsc -b && vite build)
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://placeholder.supabase.co
+          VITE_SUPABASE_ANON_KEY: placeholder
