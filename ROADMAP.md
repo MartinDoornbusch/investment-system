@@ -35,6 +35,8 @@ Planned work for the investment system. Status of the current build is at the bo
 
 ---
 
+> **Status: ✅ shipped** (LLM multi-provider) and **✅ shipped** (Bitvavo, below). Kept here for design reference.
+
 ## 2. Bitvavo live crypto integration
 
 **Why.** Hold crypto on Bitvavo. Pull balances into `holdings` automatically and price them live in EUR, so crypto shows up in the portfolio/allocation alongside the stocks.

@@ -109,10 +109,14 @@ jobs:
             select net.http_post(url:='$BASE/refresh-universe',
               headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
               body:=jsonb_build_object('step','enrich','batch',15)); \$job\$);
+          select cron.schedule('invsys-bitvavo','30 5 * * *', \$job\$
+            select net.http_post(url:='$BASE/bitvavo-sync',
+              headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
+              body:=jsonb_build_object('secret','$CRON_SECRET')); \$job\$);
           select cron.schedule('invsys-prices','0 6 * * 1-5', \$job\$
             select net.http_post(url:='$BASE/refresh-prices',
               headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),
-              body:=jsonb_build_object('tickers', array['ASML.AS','RHM.DE','ESTC','ATO.PA'])); \$job\$);
+              body:=jsonb_build_object('all', true)); \$job\$);
           select cron.schedule('invsys-fundamentals','10 6 * * *', \$job\$
             select net.http_post(url:='$BASE/refresh-fundamentals',
               headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer $SR'),

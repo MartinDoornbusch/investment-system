@@ -7,7 +7,7 @@ import { PushToggle } from '../components/PushToggle'
 import { SCORING_METHODS, UNSCORED_NOTE } from '../lib/analysis'
 import { G } from '../lib/glossary'
 
-const BUCKETS: Bucket[] = ['Core-Index', 'Core-Quality', 'Growth', 'Speculative', 'Concentrated', 'Bonds', 'Real-Assets', 'Cash']
+const BUCKETS: Bucket[] = ['Core-Index', 'Core-Quality', 'Growth', 'Speculative', 'Concentrated', 'Bonds', 'Real-Assets', 'Cash', 'Crypto']
 const PILLARS: (keyof ScoreInput)[] = ['value', 'quality', 'momentum', 'safety']
 
 // Rationale shown in tooltip per bucket trailing stop
@@ -28,6 +28,8 @@ const TRAIL_RATIONALE: Record<Bucket, string> = {
     'Default: disabled.\n\nGold, broad commodities, REITs and TIPS are diversifiers held for low correlation to stocks and inflation protection — exit via rebalancing toward target, not a mechanical trailing stop.',
   'Cash':
     'Not applicable. Cash has no price movement to trail against.',
+  'Crypto':
+    'Default: disabled.\n\nCrypto is a synced, high-volatility sleeve. Manage it primarily by position size and your target allocation. If you want a mechanical exit, set a wide trailing stop here — but crypto routinely drops 30–50% and recovers, so a tight stop will whipsaw you.',
 }
 
 // Scoring weight rationale per bucket
@@ -48,6 +50,8 @@ const WEIGHT_RATIONALE: Record<Bucket, string> = {
     'Not equity-scored. Gold, commodities, REITs and TIPS are a diversifier sleeve — held for inflation protection and low correlation, not stock-style pillar scoring.',
   'Cash':
     'Placeholder weights (25/25/25/25). Cash is rarely scored. If you are evaluating a money-market instrument or short-duration bond, safety should dominate.',
+  'Crypto':
+    'Not equity-scored. Crypto is an allocation sleeve synced from Bitvavo — managed by target weight and position size, not the equity pillar rubric.',
 }
 
 export default function Rules() {

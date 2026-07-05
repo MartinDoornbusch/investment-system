@@ -26,6 +26,7 @@ export function profileBucket(ticker: string, profile: { market_cap?: number | n
 }
 export const ASSET_CLASSES: { label: string; buckets: Bucket[] }[] = [
   { label: 'Equities', buckets: EQUITY_BUCKETS },
+  { label: 'Crypto', buckets: ['Crypto'] },
   { label: 'Bonds', buckets: ['Bonds'] },
   { label: 'Real assets', buckets: ['Real-Assets'] },
   { label: 'Cash', buckets: ['Cash'] },
@@ -58,6 +59,7 @@ export const BUCKET_LABEL: Record<Bucket, string> = {
   'Bonds': 'Bonds',
   'Real-Assets': 'Real assets',
   'Cash': 'Cash',
+  'Crypto': 'Crypto',
 }
 export const BUCKET_DESC: Record<Bucket, string> = {
   'Core-Index': 'Passive core — broad, low-cost index funds/ETFs that capture the whole market cheaply. Your anchor; not scored individually.',
@@ -68,10 +70,11 @@ export const BUCKET_DESC: Record<Bucket, string> = {
   'Bonds': 'Bonds — fixed income for ballast and income. An asset class you set manually; not equity-scored.',
   'Real-Assets': 'Real assets — property, commodities, infrastructure and other inflation hedges. Set manually; not equity-scored.',
   'Cash': 'Cash — dry powder and liquidity. Set manually; not scored.',
+  'Crypto': 'Crypto — digital assets (synced from Bitvavo). A high-volatility alternative sleeve, priced live in EUR; managed by allocation and position size, not equity-scored.',
 }
 export const BUCKET_COLOR: Record<string, string> = {
   'Core-Index': 'text-sky-400', 'Core-Quality': 'text-indigo-400', 'Growth': 'text-violet-400',
-  'Speculative': 'text-orange-400', 'Concentrated': 'text-yellow-400', 'Bonds': 'text-teal-400', 'Real-Assets': 'text-amber-400', 'Cash': 'text-dim',
+  'Speculative': 'text-orange-400', 'Concentrated': 'text-yellow-400', 'Bonds': 'text-teal-400', 'Real-Assets': 'text-amber-400', 'Cash': 'text-dim', 'Crypto': 'text-fuchsia-400',
 }
 export const bucketLabel = (b?: string) => (b && BUCKET_LABEL[b as Bucket]) || b || ''
 
@@ -86,6 +89,7 @@ export const DEFAULT_CONFIG: SystemConfig = {
     'Bonds': 15,
     'Real-Assets': 8,
     'Cash': 7,
+    'Crypto': 0,
   },
   single_name_cap: 10,
   speculative_cap: 5,
@@ -98,6 +102,7 @@ export const DEFAULT_CONFIG: SystemConfig = {
     'Bonds':        null,  // diversifier sleeve — buy-and-hold
     'Real-Assets':  null,  // diversifier sleeve — buy-and-hold
     'Cash':         null,  // n/a
+    'Crypto':       null,  // synced sleeve — manage by size; set a stop here if you want one
   },
   weights: {
     // Each row sums to 100. Tune to match how you actually pick stocks in that category.
@@ -109,6 +114,7 @@ export const DEFAULT_CONFIG: SystemConfig = {
     'Bonds':        { value: 25, quality: 25, momentum: 25, safety: 25 }, // diversifier; not equity-scored
     'Real-Assets':  { value: 25, quality: 25, momentum: 25, safety: 25 }, // diversifier; not equity-scored
     'Cash':         { value: 25, quality: 25, momentum: 25, safety: 25 }, // placeholder; rarely scored
+    'Crypto':       { value: 25, quality: 25, momentum: 25, safety: 25 }, // not equity-scored; placeholder
   },
   strong_threshold: 75,
   watch_threshold: 60,
