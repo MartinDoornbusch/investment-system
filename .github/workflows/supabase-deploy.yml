@@ -29,13 +29,39 @@ jobs:
         run: supabase db push
 
       - name: Set Edge Function secrets
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+          # LLM providers (set whichever you use) + optional overrides
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          # Bitvavo (for the upcoming crypto sync)
+          BITVAVO_API_KEY: ${{ secrets.BITVAVO_API_KEY }}
+          BITVAVO_API_SECRET: ${{ secrets.BITVAVO_API_SECRET }}
         run: |
-          supabase secrets set --project-ref "$PROJECT_REF" \
-            CRON_SECRET="${{ secrets.CRON_SECRET }}" \
-            FINNHUB_API_KEY="${{ secrets.FINNHUB_API_KEY }}" \
-            VAPID_PUBLIC_KEY="${{ secrets.VAPID_PUBLIC_KEY }}" \
-            VAPID_PRIVATE_KEY="${{ secrets.VAPID_PRIVATE_KEY }}" \
-            VAPID_SUBJECT="${{ secrets.VAPID_SUBJECT }}"
+          set -euo pipefail
+          # Only set secrets that are actually provided, so empty GitHub secrets don't clobber Supabase.
+          ARGS=()
+          for k in CRON_SECRET FINNHUB_API_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT \
+                   MASSIVE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY GEMINI_API_KEY MISTRAL_API_KEY \
+                   ANTHROPIC_API_KEY LLM_PROVIDER LLM_MODEL BITVAVO_API_KEY BITVAVO_API_SECRET; do
+            v="${!k:-}"
+            [ -n "$v" ] && ARGS+=("$k=$v")
+          done
+          if [ ${#ARGS[@]} -gt 0 ]; then
+            supabase secrets set --project-ref "$PROJECT_REF" "${ARGS[@]}"
+          else
+            echo "no secrets to set"
+          fi
 
       - name: Deploy Edge Functions
         run: supabase functions deploy --project-ref "$PROJECT_REF"
