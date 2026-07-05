@@ -2,10 +2,9 @@
 // strictly grounded in the filing text. Cached 7 days per (user,ticker) in feed_cache. On-demand only.
 // F-1 = the foreign private issuer equivalent of an S-1, so we search both (many NASDAQ IPOs are foreign filers).
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { chatCompletion, llmConfigured } from '../_shared/llm.ts'
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' }
-const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY') || ''
-const MODEL = 'claude-sonnet-4-6'
-const UA = 'investment-system research tool (contact: leon@vermaas.net)'
+const UA = 'investment-system research tool'
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || ''
 const ANON = Deno.env.get('SUPABASE_ANON_KEY') || ''
 const json = (obj: any, status = 200) => new Response(JSON.stringify(obj), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
@@ -31,7 +30,7 @@ function coreName(name: string): string {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {
-    if (!ANTHROPIC_KEY) return json({ ok: false, error: 'ANTHROPIC_API_KEY not set' })
+    if (!llmConfigured()) return json({ ok: false, error: 'No LLM key set (GROQ_API_KEY / CEREBRAS_API_KEY / GEMINI_API_KEY / MISTRAL_API_KEY / ANTHROPIC_API_KEY)' })
     const body = await req.json().catch(() => ({}))
     const ticker = String(body.ticker || '').toUpperCase().trim()
     const company = String(body.company || '').trim()
@@ -78,15 +77,16 @@ Deno.serve(async (req) => {
 **The offering** — deal size and use of proceeds.
 **Key risks** — 3-4 short bullets of the most material risk factors.
 Keep it neutral and under ~260 words. This is informational, not investment advice.`
-    const ar = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, max_tokens: 900, system, messages: [{ role: 'user', content: `Company: ${company} (${ticker})\nForm ${formName} filed: ${src.file_date}\n\nProspectus text (excerpt):\n${text}` }] }),
-    })
-    if (!ar.ok) { const t = await ar.text(); return json({ ok: false, error: `AI summary failed (${ar.status})`, detail: t.slice(0, 200), filingUrl }) }
-    const aj = await ar.json()
-    const brief = ((aj.content ?? []).map((c: any) => c.text || '').join('')).trim()
-    const payload = { ok: true, brief, filingUrl, filedAt: src.file_date, form: formName, model: MODEL }
+    let brief: string, model: string
+    try {
+      const out = await chatCompletion({
+        system,
+        user: `Company: ${company} (${ticker})\nForm ${formName} filed: ${src.file_date}\n\nProspectus text (excerpt):\n${text}`,
+        maxTokens: 900,
+      })
+      brief = out.text; model = out.model
+    } catch (e) { return json({ ok: false, error: `AI summary failed: ${String(e).slice(0, 200)}`, filingUrl }) }
+    const payload = { ok: true, brief, filingUrl, filedAt: src.file_date, form: formName, model }
     try { const { data: { user } } = await uc.auth.getUser(); if (user) await uc.from('feed_cache').upsert({ user_id: user.id, kind: cacheKind, payload, updated_at: new Date().toISOString() }) } catch (_) {}
     return json(payload)
   } catch (e) { console.error('ipo-brief', e); return json({ ok: false, error: String(e) }) }
