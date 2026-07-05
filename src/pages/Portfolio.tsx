@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getConfig, listHoldings, seedHoldings, deleteHolding, upsertHolding, listTransactions, listCorporateActions, listScores, feedTimestamps, addScore } from '../lib/db'
 import { Freshness } from '../components/Freshness'
-import { getPricesWithChange, refreshPrices, autoScore, screen, refreshFundamentals } from '../lib/prices'
+import { getPricesWithChange, refreshPrices, autoScore, screen, refreshFundamentals, bitvavoSync } from '../lib/prices'
 import { buildRows, type Row } from '../lib/portfolio'
 import { reconcile, type ReconRow } from '../lib/reconcile'
 import { DEFAULT_CONFIG, SEED_HOLDINGS, bucketLabel, ASSET_CLASSES } from '../lib/defaults'
@@ -137,6 +137,13 @@ export default function Portfolio() {
     )
     await load()
   }
+  async function doBitvavoSync() {
+    setBusy('Syncing crypto from Bitvavo…')
+    const res = await bitvavoSync()
+    if (!res.ok) { setBusy(`Bitvavo sync failed: ${res.error}`); return }
+    setBusy(`Bitvavo: ${res.coins} coin${res.coins === 1 ? '' : 's'} synced (${res.inserted} new · ${res.updated} updated · ${res.removed} removed). Now Refresh prices.`)
+    await load()
+  }
   async function doAutoScore() {
     setBusy('Auto-scoring holdings…')
     const res = await autoScore()
@@ -157,6 +164,7 @@ export default function Portfolio() {
           <button className="btn-ghost border border-slate-300" onClick={doRefresh}>&#8635; Refresh prices</button>
           <button className="btn-ghost border border-slate-300" onClick={doRefreshData}>&#x27F3; Refresh market data</button>
           <button className="btn-ghost border border-slate-300" onClick={doAutoScore}>&#x21BB; Auto-score holdings</button>
+          <button className="btn-ghost border border-slate-300" onClick={doBitvavoSync}>&#x20BF; Sync Bitvavo</button>
           {rows.length === 0 && SEED_HOLDINGS.length > 0 && <button className="btn-primary" onClick={doSeed}>Load my current portfolio</button>}
         </div>
       </div>

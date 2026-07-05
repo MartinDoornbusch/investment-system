@@ -37,15 +37,35 @@ async function yahooQuote(t: string): Promise<{ price: number; prevClose: number
   } catch { return null }
 }
 
+// Crypto (e.g. BTC-EUR) via Bitvavo's public ticker — keyless, EUR-native.
+async function bitvavoQuote(market: string): Promise<{ price: number; changePct: number | null; prevClose: number | null } | null> {
+  try {
+    const r = await fetch(`https://api.bitvavo.com/v2/ticker/24h?market=${encodeURIComponent(market)}`)
+    if (!r.ok) return null
+    const j = await r.json()
+    const last = Number(j?.last), open = Number(j?.open)
+    if (!isFinite(last) || last <= 0) return null
+    const changePct = isFinite(open) && open > 0 ? ((last - open) / open) * 100 : null
+    return { price: last, changePct, prevClose: isFinite(open) && open > 0 ? open : null }
+  } catch { return null }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {
-    const { tickers } = await req.json()
-    if (!Array.isArray(tickers) || tickers.length === 0)
-      return new Response(JSON.stringify({ ok: false, error: 'no tickers' }), { status: 400, headers: cors })
+    const body = await req.json().catch(() => ({}))
     if (!KEY) return new Response(JSON.stringify({ ok: false, error: 'FINNHUB_API_KEY not set' }), { status: 500, headers: cors })
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+    // Explicit list from the caller, or (cron / body.all) every holdings + watchlist ticker — so crypto
+    // is priced automatically and the list never goes stale when holdings change.
+    let tickers: string[] = Array.isArray(body.tickers) ? body.tickers : []
+    if (!tickers.length || body.all) {
+      const [{ data: h }, { data: w }] = await Promise.all([admin.from('holdings').select('ticker'), admin.from('watchlist').select('ticker')])
+      tickers = Array.from(new Set([...(h ?? []), ...(w ?? [])].map((x: any) => x.ticker).filter(Boolean)))
+    }
+    if (!tickers.length)
+      return new Response(JSON.stringify({ ok: false, error: 'no tickers' }), { status: 400, headers: cors })
     // USD→EUR conversion rate (USD per 1 EUR). Prefer a live ECB rate (frankfurter.app — free, keyless),
     // fall back to the configured value, then a hardcoded constant. Persisting the live rate back into
     // config (with a timestamp) means every consumer that reads cfg.eur_usd stops silently drifting.
@@ -61,6 +81,13 @@ Deno.serve(async (req) => {
     const errors: string[] = []
     for (const raw of tickers) {
       const t = String(raw)
+      if (t.endsWith('-EUR')) {
+        // Crypto (Bitvavo public ticker) — already in EUR.
+        const c = await bitvavoQuote(t); await sleep(120)
+        if (c) rows.push({ ticker: t, price: c.price, change_pct: c.changePct, prev_close: c.prevClose, updated_at: new Date().toISOString() })
+        else errors.push(`${t}:bitvavo-fail`)
+        continue
+      }
       if (t.includes('.')) {
         // Non-US listing — prefer the native Yahoo quote (correct local currency, real local close).
         const y = await yahooQuote(t); await sleep(250)

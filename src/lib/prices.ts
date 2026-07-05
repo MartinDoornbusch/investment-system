@@ -127,3 +127,11 @@ export async function refreshFundamentals(batch = 4): Promise<{ ok: boolean; ref
     return data
   } catch (e: any) { return { ok: false, error: e?.message ?? 'refresh failed' } }
 }
+
+export async function bitvavoSync(): Promise<{ ok: boolean; coins?: number; inserted?: number; updated?: number; removed?: number; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('bitvavo-sync', { body: {} })
+    if (error) return { ok: false, error: error.message }
+    return data
+  } catch (e: any) { return { ok: false, error: e?.message ?? 'sync failed' } }
+}

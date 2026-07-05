@@ -1,4 +1,4 @@
-export type Bucket = 'Core-Index' | 'Core-Quality' | 'Growth' | 'Speculative' | 'Concentrated' | 'Bonds' | 'Real-Assets' | 'Cash'
+export type Bucket = 'Core-Index' | 'Core-Quality' | 'Growth' | 'Speculative' | 'Concentrated' | 'Bonds' | 'Real-Assets' | 'Cash' | 'Crypto'
 
 export interface Holding {
   id?: string
